@@ -59,10 +59,17 @@
       args:
         creates: /etc/docker/daemon.json
 
-    - name: Restart Docker service
-      ansible.builtin.service:
-        name: docker
-        state: restarted
+    - name: Configure Docker daemon to disable iptables
+      ansible.builtin.copy:
+        content: |
+          {
+            "iptables": false
+          }
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+
+    - name: Restart Docker daemon
+      ansible.builtin.shell: sudo systemctl restart docker
 
     - name: Run Ollama container with GPU support
       community.docker.docker_container:

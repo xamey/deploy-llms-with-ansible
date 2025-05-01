@@ -43,6 +43,18 @@
         state: directory
         mode: "0755"
 
+    - name: Configure Docker daemon to disable iptables
+      ansible.builtin.copy:
+        content: |
+          {
+            "iptables": false
+          }
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+
+    - name: Restart Docker daemon
+      ansible.builtin.shell: sudo systemctl restart docker
+
     - name: Install Git LFS
       apt:
         name: git-lfs
