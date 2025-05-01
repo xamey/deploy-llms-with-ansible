@@ -1,0 +1,96 @@
+---
+- name: Run ollama using Docker and ensure necessary dependencies are present
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Ensure UFW is installed
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+
+    - name: Set default UFW policies
+      ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Allow incoming SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow port 8080 only from specific IPs
+      ufw:
+        rule: allow
+        port: "8080"
+        proto: tcp
+        from_ip: "{{ item }}"
+      loop: "{{ allowed_ip_for_8080 }}"
+
+    - name: Enable UFW (ensure it's idempotent and doesn't drop SSH)
+      ufw:
+        state: enabled
+        policy: deny
+        logging: "on"
+
+    - name: Add NVIDIA container key
+      ansible.builtin.shell: curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+    - name: Add NVIDIA container toolkit repository
+      ansible.builtin.shell: curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g'  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      args:
+        creates: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+    - name: Update APT package index
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install NVIDIA Container Toolkit
+      ansible.builtin.apt:
+        name: nvidia-container-toolkit
+        state: present
+
+    - name: Configure NVIDIA runtime for Docker
+      ansible.builtin.command: nvidia-ctk runtime configure --runtime=docker
+      args:
+        creates: /etc/docker/daemon.json
+
+    - name: Restart Docker service
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+
+    - name: Run Ollama container with GPU support
+      community.docker.docker_container:
+        name: ollama
+        image: ollama/ollama
+        state: started
+        restart_policy: always
+        published_ports:
+          - "8080:11434"
+        volumes:
+          - ollama:/root/.ollama
+        device_requests:
+          - capabilities:
+              - "gpu"
+
+    - name: Pull {{ model_name }} model inside Ollama container
+      ansible.builtin.command: docker exec ollama ollama pull {{ model_name }}
+      register: pull_result
+      until: pull_result.rc == 0
+      retries: 3
+      delay: 10
+
+    - name: Verify model is available
+      ansible.builtin.command: docker exec ollama ollama list | grep {{ model_name }}
+      register: model_check
+      failed_when: model_check.rc != 0
+
+    - name: Serve Ollama as HTTP endpoint
+      ansible.builtin.command: docker exec ollama ollama serve
+      async: 31536000
+      poll: 0

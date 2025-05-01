@@ -1,0 +1,10 @@
+all:
+  hosts:
+    remote-ollama:
+      ansible_host: YOUR_IP
+      ansible_user: YOUR_USER
+      ansible_ssh_private_key_file: ~/.ssh/key
+      model_name: https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/main/Qwen_Qwen3-0.6B-Q6_K.gguf
+      allowed_ip_for_8080:
+        - "10.0.0.1"
+        - "10.0.0.2"

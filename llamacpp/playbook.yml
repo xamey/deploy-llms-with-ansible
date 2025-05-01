@@ -1,0 +1,77 @@
+---
+- name: Install llama.cpp using Docker and ensure necessary dependencies are present
+  hosts: all
+  become: true
+  vars:
+    models_path: "/opt/models"
+
+  tasks:
+    - name: Ensure UFW is installed
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+
+    - name: Set default UFW policies
+      ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Allow incoming SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow port 8080 only from specific IPs
+      ufw:
+        rule: allow
+        port: "8080"
+        proto: tcp
+        from_ip: "{{ item }}"
+      loop: "{{ allowed_ip_for_8080 }}"
+
+    - name: Enable UFW (ensure it's idempotent and doesn't drop SSH)
+      ufw:
+        state: enabled
+        policy: deny
+        logging: "on"
+
+    - name: Create models directory
+      file:
+        path: "{{ models_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Install Git LFS
+      apt:
+        name: git-lfs
+        state: present
+        update_cache: yes
+
+    - name: Extract model file name from URL
+      set_fact:
+        model_filename: "{{ model_url | regex_replace('.*/', '') }}"
+        model_name: "{{ model_url | regex_replace('.*/', '') | regex_replace('\\.gguf$', '') }}"
+
+    - name: Download model file
+      get_url:
+        url: "{{ model_url }}"
+        dest: "{{ models_path }}/{{ model_filename }}"
+        mode: "0644"
+
+    - name: Run llama.cpp Docker container
+      docker_container:
+        name: llama-cpp-server
+        image: ghcr.io/ggml-org/llama.cpp:server
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "8080:8080"
+        volumes:
+          - "{{ models_path }}:/models"
+        command: >
+          -m /models/{{ model_filename }} -c 512 --host 0.0.0.0 --port 8080
+          --jinja --reasoning-format deepseek -ngl 99 -fa -sm row
+          --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0
+          -c 40960 -n 32768 --no-context-shift
